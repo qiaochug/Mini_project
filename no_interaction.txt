@@ -1,0 +1,80 @@
+```{r}
+fit_b1 <- glm(readmitted ~ ., data_train, family=binomial)
+Anova(fit_b1) # kick out num_lab_procedures      0.03  1  0.8617590
+```
+```{r}
+fit_b2 <- update(fit_b1, .~. -num_lab_procedures)
+Anova(fit_b2) # kick out glyburide               0.81  3  0.8478891
+```
+
+```{r}
+fit_b3 <- update(fit_b2, .~. -glyburide)
+Anova(fit_b3) # kick out number_outpatient       0.05  1  0.8285082
+```
+
+```{r}
+fit_b4 <- update(fit_b3, .~. -number_outpatient)
+Anova(fit_b4) # kick out change                  0.45  1  0.5009261 
+```
+
+```{r}
+fit_b5 <- update(fit_b4, .~. -change)
+Anova(fit_b5) # kick out adm_typ_mod             2.45  3  0.4847046
+```
+
+```{r}
+fit_b6 <- update(fit_b5, .~. -adm_typ_mod)
+Anova(fit_b6) #kick out number_diagnoses        0.66  1  0.4161294 
+```
+
+```{r}
+fit_b7 <- update(fit_b6, .~. -number_diagnoses)
+Anova(fit_b7) # kick out max_glu_serum           2.73  3  0.4349240
+```
+
+```{r}
+fit_b8 <- update(fit_b7, .~. -max_glu_serum)
+Anova(fit_b8) # kick out gender                  0.85  1  0.3565624 
+```
+
+```{r}
+fit_b9 <- update(fit_b8, .~. -gender)
+Anova(fit_b9) # kick out race                    5.75  5   0.331540
+```
+
+```{r}
+fit_b10 <- update(fit_b9, .~. -race)
+Anova(fit_b10) #kick out glimepiride             3.74  3  0.2914788
+```
+
+```{r}
+fit_b11 <- update(fit_b10, .~. -glimepiride)
+Anova(fit_b11) #kick out pioglitazone            4.17  3  0.2434434
+```
+
+```{r}
+fit_b12 <- update(fit_b11, .~. -pioglitazone)
+Anova(fit_b12) #kick out num_procedures          2.59  1  0.1072959
+```
+
+```{r}
+fit_b13 <- update(fit_b12, .~. -num_procedures)
+Anova(fit_b13) # kick out A1Cresult               6.21  3  0.1016142
+```
+
+```{r}
+fit_b14 <- update(fit_b13, .~. -A1Cresult)
+Anova(fit_b14) # kick out time_in_hospital        3.34  1  0.0674285
+```
+
+```{r}
+fit_b15 <- update(fit_b14, .~. -time_in_hospital)
+Anova(fit_b15) # no need to kick out anymore, all f stat below 0.05
+```
+
+```{r}
+fit_b_fl_input <- "readmitted ~ num_medications + number_emergency + number_inpatient + metformin + glipizide + rosiglitazone + insulin + diabetesMed + disch_disp_modified + adm_src_mod + age_mod + diag1_mod + diag2_mod + diag3_mod"
+fit_b_fl <- glm(fit_b_fl_input, data = data_train, family = binomial)
+```
+
+"readmitted ~ num_medications + number_emergency + number_inpatient + metformin + glipizide + rosiglitazone + insulin + diabetesMed + disch_disp_modified + adm_src_mod + age_mod + diag1_mod + diag2_mod + diag3_mod"

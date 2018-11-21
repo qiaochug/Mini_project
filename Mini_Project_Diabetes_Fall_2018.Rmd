@@ -1,0 +1,355 @@
+---
+title: "Predicting readmission probability for diabetes inpatients"
+graphics: yes
+date: 'Due: Sunday, Nov 18th, 2018 at 11:59PM'
+output:
+  word_document:
+    toc: yes
+    toc_depth: '4'
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+  html_document:
+    code_folding: show
+    highlight: haddock
+    theme: lumen
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+subtitle: STAT 471/571/701, Fall 2018
+header-includes:
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \fancyfoot[CO,CE]{}
+- \fancyfoot[LE,RO]{\thepage}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      tidy = TRUE, fig.width = 7, fig.height = 4,
+                      fig.align='left', dev = 'pdf')
+if(!require("pacman")) install.packages("pacman")
+pacman::p_load(dplyr, ggplot2, glmnet, car, bestglm, tree, reshape2, gglasso, pROC)
+```
+
+
+
+
+
+```{r, include = F}
+re_data <- read.csv("readmission.csv", header=T) #eda using the re_data
+re_data_gender_drop <- re_data[re_data$gender != "Unknown/Invalid",]
+re_data_gender_drop$gender <- as.factor(as.character(re_data_gender_drop$gender))
+str(re_data_gender_drop)
+re_data_response <- re_data_gender_drop
+re_data_response$readmitted <- re_data_gender_drop$readmitted == "<30"
+re_data_response$readmitted <- as.factor(as.numeric(re_data_response$readmitted))
+re_data_response$encounter_id <- NULL
+re_data_response$patient_nbr <- NULL
+str(re_data_response)
+```
+
+
+```{r}
+re_data_tr <- re_data_response
+re_data_tr$time_in_hospital <- log(re_data_tr$time_in_hospital)
+re_data_tr$num_medications <- log(re_data_tr$num_medications)
+# add 1 to adjust all the numbers to more than 1 before taking log
+re_data_tr$number_outpatient <- log(re_data_tr$number_outpatient+1)
+re_data_tr$number_inpatient <- log(re_data_tr$number_inpatient+1)
+re_data_tr$number_emergency <- log(re_data_tr$number_emergency+1)
+```
+
+```{r, eval=F}
+re_data_response %>%
+  select_if(is.numeric) %>%
+  select(time_in_hospital,num_lab_procedures,num_procedures,num_medications,number_outpatient,number_inpatient,number_emergency,number_diagnoses) %>%
+  pairs()
+```
+
+```{r, eval = F}
+re_data_tr %>%
+  select_if(is.numeric) %>%
+  select(time_in_hospital,num_lab_procedures,num_procedures,num_medications,number_outpatient,number_inpatient,number_emergency,number_diagnoses) %>%
+  pairs()
+```
+
+```{r}
+cor(re_data_tr[,c("time_in_hospital", "num_lab_procedures", "num_procedures", "num_medications", "number_outpatient", "number_inpatient", "number_emergency", "number_diagnoses")])
+
+plotData <-melt(cor(re_data_tr[sapply(re_data_tr, is.numeric)]))
+
+ggplot(plotData ,
+    aes(x = Var1, y = Var2, fill =value)) +
+    geom_tile() +
+    ylab("") +
+    xlab("") +
+scale_x_discrete(limits = rev(levels(plotData $Var2))) + #Flip the x- or y-axis
+    scale_fill_gradient( low = "#56B1F7", high = "#132B43") +     #lightblue to darkblue
+    #scale_fill_gradient( low = "white", high = "black") + #white to black
+       guides(fill = guide_legend(title = "Correlation"))
+
+#interaction
+#num_medications * time_in_hospital 0.454470330
+#num_lab_procedures * time_in_hospital 0.331627515
+#num_medications * num_procedures 0.33085935
+```
+```{r}
+set.seed(3)
+sample_index <- sample(nrow(re_data_tr), 5000,replace = F)
+fit.tree <- tree(readmitted ~ time_in_hospital + num_lab_procedures + num_procedures + num_medications + number_outpatient + number_inpatient + number_emergency + number_diagnoses, data = re_data_tr[sample_index,],split="deviance", control = tree.control(nobs = nrow(data_train), mindev = 0.0015))
+fit.tree$frame
+plot(fit.tree)
+text(fit.tree, pretty=TRUE)
+
+#num_medications * time_in_hospital 4
+#num_lab_procedures * time_in_hospital 3
+#num_medications * num_procedures 1
+```
+
+```{r}
+re_data_cor <- re_data_tr
+re_data_cor$med_x_time_in_hospital <- re_data_cor$num_medications*re_data_cor$time_in_hospital
+re_data_cor$lab_procedures_x_time_in_hospital <- re_data_cor$num_lab_procedures*re_data_cor$time_in_hospital
+re_data_cor$med_x_procedures <- re_data_cor$num_medications* re_data_cor$num_procedures
+```
+
+
+```{r}
+par(mfrow=c(2,1), mar=c(2.5,3,1.5,1), mgp=c(1.5,0.5,0))  
+hist(as.numeric(re_data_response$diag3_mod[re_data_response$readmitted=="0"]))
+hist(as.numeric(re_data_response$diag3_mod[re_data_response$readmitted=="1"]))
+```
+
+```{r}
+set.seed(1)
+
+total_size <- dim(re_data_cor)[1]
+vali_size <- round(total_size*0.1)
+test_size <- round(total_size*0.1)
+
+vali_test_index  <- sample(total_size, size = vali_size + test_size, replace = F)
+vali_index_index <- sample(length(vali_test_index), size = vali_size, replace = F)
+vali_index <- vali_test_index[vali_index_index]
+test_index <- vali_test_index[-vali_index_index]
+
+data_train <- re_data_cor[-vali_test_index,]
+data_vali <- re_data_cor[vali_index,]
+data_test <- re_data_cor[test_index,]
+```
+
+```{r}
+fit.inter <- glm(readmitted ~ med_x_procedures + num_procedures + num_medications, data = data_train, family = binomial)
+summary(fit.inter)
+```
+
+
+
+```{r}
+fit_b1 <- glm(readmitted ~ ., data_train, family=binomial)
+Anova(fit_b1) # kick out time_in_hospital                      0.00  1  0.9728004 
+```
+
+```{r}
+fit_b2 <- update(fit_b1, .~. -time_in_hospital)
+Anova(fit_b2) # kick out lab_procedures_x_time_in_hospital     0.00  1  0.9571733
+```
+
+```{r}
+fit_b3 <- update(fit_b2, .~. -lab_procedures_x_time_in_hospital)
+anova_fit_b3 <- Anova(fit_b3) # kick out med_x_procedures           0.02  1  0.9014751
+anova_fit_b3
+```
+
+```{r}
+fit_b4 <- update(fit_b3, .~. -med_x_procedures)
+anova_fit_b4 <- Anova(fit_b4) # kick out num_lab_procedures         0.02  1  0.8964372
+anova_fit_b4
+```
+
+```{r}
+fit_b5 <- update(fit_b4, .~. -num_lab_procedures)
+anova_fit_b5 <- Anova(fit_b5) # kick out glyburide                  0.82  3   0.844313
+anova_fit_b5
+```
+
+```{r}
+fit_b6 <- update(fit_b5, .~. -glyburide)
+anova_fit_b6 <- Anova(fit_b6) #kick out number_outpatient          0.05  1  0.8247259 
+anova_fit_b6
+```
+
+```{r}
+fit_b7 <- update(fit_b6, .~. -number_outpatient)
+anova_fit_b7 <- Anova(fit_b7) # kick out change                     0.44  1  0.5058623
+anova_fit_b7
+```
+
+```{r}
+fit_b8 <- update(fit_b7, .~. -change)
+Anova(fit_b8) # kick out adm_typ_mod                2.41  3  0.4911678
+```
+
+```{r}
+fit_b9 <- update(fit_b8, .~. -adm_typ_mod)
+anova_fit_b9 <- Anova(fit_b9) # kick out number_diagnoses           0.68  1  0.4105507 
+anova_fit_b9
+```
+
+```{r}
+fit_b10 <- update(fit_b9, .~. - number_diagnoses)
+anova_fit_b10 <- Anova(fit_b10) #kick out max_glu_serum              2.74  3   0.433500  
+anova_fit_b10
+```
+
+```{r}
+fit_b11 <- update(fit_b10, .~. -max_glu_serum)
+anova_fit_b11 <- Anova(fit_b11) #kick out gender                     0.85  1  0.3568249 
+anova_fit_b11
+```
+
+```{r}
+fit_b12 <- update(fit_b11, .~. -gender)
+anova_fit_b12 <- Anova(fit_b12) #kick out race                       5.75  5  0.3310389 
+anova_fit_b12
+```
+
+```{r}
+fit_b13 <- update(fit_b12, .~. -race)
+anova_fit_b13 <- Anova(fit_b13) # kick out glimepiride                3.72  3  0.2927723
+anova_fit_b13
+```
+
+```{r}
+fit_b14 <- update(fit_b13, .~. -glimepiride)
+anova_fit_b14 <- Anova(fit_b14) # kick out pioglitazone               4.16  3  0.2446772   
+anova_fit_b14
+```
+
+```{r}
+fit_b15 <- update(fit_b14, .~. -pioglitazone)
+anova_fit_b15 <- Anova(fit_b15) # kick out A1Cresult                  6.33  3  0.0965374 
+anova_fit_b15
+```
+
+```{r}
+fit_b16 <- update(fit_b15, .~. -A1Cresult)
+anova_fit_b16 <- Anova(fit_b16) # kick out num_procedures             2.69  1  0.1012754
+anova_fit_b16
+```
+```{r}
+fit_b17 <- update(fit_b16, .~. -num_procedures)
+anova_fit_b17 <- Anova(fit_b17) # kick out  num_medications            2.65  1  0.1033706
+anova_fit_b17
+```
+
+```{r}
+fit_b18 <- update(fit_b17, .~. -num_medications)
+anova_fit_b18 <- Anova(fit_b18) # p-values for all variables below 0.05 level
+anova_fit_b18
+```
+```{r}
+levels(data_train$diag1_mod)
+```
+
+```{r}
+summary(fit_b18) 
+```
+
+```{r}
+fit_b_fl_input.2 <- "readmitted ~ number_emergency + number_inpatient + metformin + glipizide + rosiglitazone + insulin + diabetesMed + disch_disp_modified + adm_src_mod + age_mod + diag1_mod + diag2_mod + diag3_mod + med_x_time_in_hospital"
+fit_b_fl.2 <- glm(fit_b_fl_input.2, data = data_train, family = binomial)
+```
+
+```{r}
+#lasso
+X_train <- model.matrix(readmitted ~num_medications + number_emergency + number_inpatient + metformin + glipizide + rosiglitazone + insulin + diabetesMed + disch_disp_modified + adm_src_mod + age_mod + diag1_mod + diag2_mod + diag3_mod+0, data = data_train)
+Y_train <- data_train[,"readmitted"]
+```
+
+```{r}
+set.seed(10) # to have same sets of K folds
+#set.seed(1)
+l_log <- seq(-9,0,length.out = 200)
+l <- 10^l_log
+fit.cv <- cv.glmnet(X_train, Y_train, alpha=1, family="binomial", nfolds = 10, type.measure = "deviance", lambda = l)  
+#plot(fit1.cv)
+```
+
+```{r}
+plot(fit.cv)
+coef.1se <- coef(fit.cv, s="lambda.1se")  
+coef.1se <- coef.1se[which(coef.1se !=0),] 
+names(coef.1se)
+```
+
+```{r}
+lasso.input <- "readmitted ~ num_medications + number_emergency + number_inpatient + diabetesMed +disch_disp_modified +diag1_mod + diag3_mod"
+fit.lasso <- glm(lasso.input, data = data_train, family = binomial)
+Anova(fit.lasso)
+```
+
+```{r}
+summary(fit.lasso)
+```
+
+
+```{r}
+prob.b.2 <- predict(fit_b_fl.2, data_vali) # Prob(y=1|x)
+plot(roc(data_vali$readmitted, prob.b.2), print.auc = TRUE, col = "red")
+prob.lasso <- predict(fit.lasso, data_vali) # Prob(y=1|x)
+plot(roc(data_vali$readmitted, prob.lasso),print.auc = TRUE, print.auc.y = .4, col = "blue", add = T)
+```
+
+
+```{r}
+#bayes rule fit_b_fl.2
+fit.fl <- fit.lasso
+data_set <- data_test
+
+
+threshold <- (1/2)/(1+1/2)
+prob.vali.b <- predict(fit.fl, data_set, type = "response")
+fit.pred.bayes <- rep("0", dim(data_set)[1])
+fit.pred.bayes <- as.factor(ifelse(prob.vali.b > threshold, "1", "0"))
+MCE.bayes=(sum(2*(fit.pred.bayes[data_set$readmitted == "1"] != "1")) 
+           + sum(fit.pred.bayes[data_set$readmitted == "0"] != "0"))/length(data_set$readmitted)
+MCE.bayes
+```
+
+```{r}
+#confusion matrix (1060+43)/(1060+43+9000+73)
+cm <- table(fit.pred.bayes, data_vali$readmitted) # confusion matrix: 
+cm
+sensitivity <- cm[2,2]/sum(data_vali$readmitted == "1")  # 1/311
+sensitivity
+specificity <- cm[1,1]/ sum(data_vali$readmitted == "0")
+specificity
+false.positive <- cm[2,1]/sum(data_vali$readmitted == "0")  # 5/1095
+false.positive
+```
+
+```{r}
+#confusion matrix
+cm <- table(fit.pred.bayes, data_vali$readmitted) # confusion matrix: 
+cm
+sensitivity <- cm[2,2]/sum(data_vali$readmitted == "1")  # 1/311
+sensitivity
+specificity <- cm[1,1]/ sum(data_vali$readmitted == "0")
+specificity
+false.positive <- cm[2,1]/sum(data_vali$readmitted == "0")  # 5/1095
+false.positive
+```
+
+```{r}
+cm <- table(fit.pred.bayes, data_test$readmitted) # confusion matrix: 
+cm
+sensitivity <- cm[2,2]/sum(data_test$readmitted == "1")  # 1/311
+sensitivity
+specificity <- cm[1,1]/ sum(data_test$readmitted == "0")
+specificity
+false.positive <- cm[2,1]/sum(data_test$readmitted == "0")  # 5/1095
+false.positive
+```
+
+

@@ -1,0 +1,47 @@
+the three diag all has more than 1000 for each, significant
+no na
+# gender is the only categorical variable with one level of less than 100 patients, drop that 3 patients
+use data_train to build model, use data_vali to choose model type, use data_test to test
+
+readmission:
+	 <30   >30    NO 
+	11357 35545 54861 
+
+"race"                "gender"   "max_glu_serum"       "A1Cresult"           "metformin"           "glimepiride"        
+"glipizide"           "glyburide"           "pioglitazone"        "rosiglitazone"      
+"insulin"             "change"              "diabetesMed"         "disch_disp_modified"
+"adm_src_mod"         "adm_typ_mod"         "age_mod"             "diag1_mod"          
+"diag2_mod"           "diag3_mod"           "readmitted"
+
+interesting hist: change
+
+"time_in_hospital" box plot: nearly exactly the same; jitter: nothing interesting
+"num_lab_procedures" box plot: nearly the same with similar mean;
+"num_procedures" box plot: nearly exactly the same
+"num_medications"  box plot: nearly the same with similar mean; jitter: non admitted heavier tail, admitted more positively skewed
+"number_outpatient"  box plot: nearly the same with mostly 0, False has slightly more outpatients; jitter non-re heavier tail
+"number_inpatient" box plot: same mean 0, readmitted patients have heavy tail
+"number_emergency" box plot: same mean 0, non-re patients have slightly heavier tail; jitter agree
+"number_diagnoses" box plot: same range, readmitted patients have higher mean; jitter: and heavier tail
+
+Continuous variables:
+	time_in_hospital,num_lab_procedures,num_procedures,num_medications,number_outpatient,number_inpatient,number_emergency,number_diagnoses
+
+should transform: 
+	time_in_hospital
+	num_medications
+	number of outpatient
+	number of inpatient
+	number_emergency
+ 
+
+Diseases to watch closely:
+	250.6 Diabetes with neurological manifestations
+	434 Occlusion of cerebral arteries
+
+	250.1 Diabetes with ketoacidosis
+	250.02 Diabetic coma
+
+	250.6
+	585 Chronic kidney disease
+	250.02
